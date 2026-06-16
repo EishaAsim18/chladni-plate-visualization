@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Interactive Chladni plate: standing-wave eigenfunctions, nodal geometry, and live microphone-driven resonance in pseudo-AR."
+  />
+  <meta name="theme-color" content="#05080f" />
+  <title>Visualizing Eigenfunctions: Chladni Plate and Nodal Surface Geometry</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- Webcam feed: pseudo-AR background layer -->
+  <video id="webcam" class="webcam" autoplay playsinline muted></video>
+
+  <!-- Three.js renders transparent WebGL on top of the video -->
+  <canvas id="c3d" class="webgl-canvas" aria-label="Three.js Chladni plate view"></canvas>
+
+  <div class="app-frame">
+    <header class="app-header">
+      <h1>Chladni Eigenmodes</h1>
+      <p class="subtitle">Standing waves · Nodal geometry · Audio-driven resonance</p>
+    </header>
+
+    <!-- Compact readout when the full telemetry panel is hidden (narrow viewports) -->
+    <div class="telemetry-strip" id="telemetryStrip" aria-label="Live telemetry">
+      <div class="telemetry-strip__inner">
+        <span class="telemetry-strip__item"><abbr title="Frames per second">FPS</abbr> <strong id="stripFps">—</strong></span>
+        <span class="telemetry-strip__sep" aria-hidden="true">·</span>
+        <span class="telemetry-strip__item"><abbr title="Dominant frequency">f</abbr> <strong id="stripFreq">—</strong></span>
+        <span class="telemetry-strip__sep" aria-hidden="true">·</span>
+        <span class="telemetry-strip__item"><abbr title="RMS amplitude">A</abbr> <strong id="stripAmp">—</strong></span>
+        <span class="telemetry-strip__sep" aria-hidden="true">·</span>
+        <span class="telemetry-strip__item">mode <strong id="stripMode">—</strong></span>
+        <span class="telemetry-strip__sep" aria-hidden="true">·</span>
+        <span class="telemetry-strip__item"><abbr title="Angular frequency">ω</abbr> <strong id="stripOmega">—</strong></span>
+      </div>
+    </div>
+
+    <aside class="panel panel--left">
+      <h2>Controls</h2>
+
+      <p class="input-hint">Microphone and camera are optional. The built-in demo tone does not use the microphone.</p>
+      <div class="field field--row input-actions">
+        <button type="button" id="micBtn" class="btn btn--accent" aria-pressed="false">
+          Enable microphone
+        </button>
+        <button type="button" id="camBtn" class="btn" aria-pressed="false">Enable camera</button>
+      </div>
+
+      <div class="field">
+        <span>Built-in demo tone (no microphone)</span>
+        <select id="builtinPreset" class="select" aria-label="Eigenmode pitch for demo tone">
+          <option value="1,1">(1, 1) — fundamental (~75 Hz)</option>
+          <option value="2,1">(2, 1) (~113 Hz)</option>
+          <option value="1,2">(1, 2) (~143 Hz)</option>
+          <option value="2,2">(2, 2) (~178 Hz)</option>
+          <option value="3,2">(3, 2) (~225 Hz)</option>
+          <option value="3,3">(3, 3) (~340 Hz)</option>
+          <option value="4,3">(4, 3) (~425 Hz)</option>
+          <option value="5,4">(5, 4) (~750 Hz)</option>
+        </select>
+      </div>
+      <div class="field field--row input-actions">
+        <button type="button" id="builtinBtn" class="btn btn--primary" aria-pressed="false">
+          Play demo tone
+        </button>
+      </div>
+
+      <p class="session-status" id="sessionStatus" aria-live="polite">
+        Ready — use <strong>Play demo tone</strong> for stable patterns without a mic, or enable the microphone when prompted.
+      </p>
+
+      <label class="field">
+        <span>Microphone sensitivity</span>
+        <input type="range" id="sensitivity" min="0.1" max="5" step="0.05" value="1.2" />
+        <span class="field__value" id="sensitivityVal">1.2</span>
+      </label>
+
+      <label class="field">
+        <span>Frequency scaling (ω)</span>
+        <input type="range" id="freqScale" min="0.1" max="3" step="0.05" value="1" />
+        <span class="field__value" id="freqScaleVal">1.0</span>
+      </label>
+
+      <label class="field">
+        <span>Vibration intensity</span>
+        <input type="range" id="intensity" min="0" max="2" step="0.02" value="1.05" />
+        <span class="field__value" id="intensityVal">1.05</span>
+      </label>
+
+      <div class="field field--row">
+        <button type="button" id="pauseBtn" class="btn btn--primary">Pause</button>
+        <button type="button" id="fullscreenBtn" class="btn">Fullscreen</button>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="cameraOrbitToggle" />
+        <span>Slow camera orbit (otherwise the view stays still)</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="holdPatternToggle" />
+        <span>Hold current (m, n) in Audio-driven mode — freezes the mode shape until you turn this off</span>
+      </label>
+
+      <div class="field">
+        <span>Eigenmode preset</span>
+        <select id="modePreset" class="select">
+          <option value="auto">Audio-driven (auto)</option>
+          <option value="1,1">(1, 1) — fundamental</option>
+          <option value="2,1">(2, 1)</option>
+          <option value="1,2">(1, 2)</option>
+          <option value="2,2">(2, 2)</option>
+          <option value="3,2">(3, 2)</option>
+          <option value="3,3">(3, 3)</option>
+          <option value="4,3">(4, 3)</option>
+          <option value="5,4">(5, 4)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <span>View</span>
+        <select id="viewMode" class="select">
+          <option value="surface" selected>Surface (3D displacement)</option>
+          <option value="hybrid">Hybrid (low 3D + contours)</option>
+          <option value="contour">Contour (flat + isolines)</option>
+        </select>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="nodalGeometryToggle" />
+        <span>Nodal geometry mode (transparent surface, bright nodal lines)</span>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="heatmapToggle" />
+        <span>Plate tint (subtle nodal shading on brass — sand shows the main pattern)</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="contourToggle" checked />
+        <span>Mesh edge lines (geometry edges)</span>
+      </label>
+    </aside>
+
+    <aside class="panel panel--right">
+      <h2>Telemetry</h2>
+      <dl class="metrics">
+        <dt>Detected frequency</dt>
+        <dd id="metricFreq">— Hz</dd>
+        <dt>Amplitude (RMS)</dt>
+        <dd id="metricAmp">—</dd>
+        <dt>Mode (m, n)</dt>
+        <dd id="metricMode">—</dd>
+        <dt>Eigenfunction u(x,y,t)</dt>
+        <dd id="metricEq" class="equation">u(x,y,t) = A·sin(mπx)·sin(nπy)·cos(ωt)</dd>
+        <dt>Angular frequency ω</dt>
+        <dd id="metricOmega">—</dd>
+        <dt>Nodal condition (mode shape)</dt>
+        <dd id="metricNodal" class="equation-small">sin(mπx)sin(nπy) = 0</dd>
+        <dt>FPS</dt>
+        <dd id="metricFps">—</dd>
+      </dl>
+      <p class="hint">
+        <strong>Idealized physics:</strong> the plate mode is the Dirichlet eigenfunction
+        sin(mπx)sin(nπy); its zero set (nodal lines) matches multivariable calculus for u when cos(ωt)≠0.
+        Coordinates (x, y) map to world X and Z; u is along Y. This is a <strong>membrane-style</strong> teaching model, not stiff-plate theory (real metal plates differ in spectrum and mode shapes).
+        <strong>Sand</strong> is a simplified drift toward that nodal network (inspired by experiments, not a full grain simulation); allow a few seconds after changing (m, n).
+        Use <strong>Play demo tone</strong> for a steady built-in pitch (same frequency bands as Audio-driven) when you do not want the microphone.
+        Look reference: <a href="https://youtube.com/shorts/jSefO-CGJX0?si=fphaOgLfZS7ySsE9" target="_blank" rel="noopener noreferrer">tabletop-style demo</a>.
+        If <strong>Pause</strong> is on, grains stop moving. Noisy mic in Audio-driven mode smears (m, n)—use Hold, a preset, or a steady tone.
+        Camera only orbits if you enable <strong>Slow camera orbit</strong>.
+      </p>
+    </aside>
+  </div>
+
+  <div id="statusBanner" class="banner" role="status" aria-live="polite"></div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
